@@ -11,5 +11,7 @@ class InputRow(b: String, t: Long) {
   def getBody: String = body
   def getTimestamp: Long = timestamp
 
-
+  override def toString: String = {
+    "body=" + b.toString + " timestamp=" + timestamp.toString
+  }
 }

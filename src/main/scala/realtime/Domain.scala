@@ -7,15 +7,6 @@ import org.joda.time.{MutableDateTime, DateTime}
 object Domain {
 
 
-  class InputRow(b: String, t: Long) {
-
-    private val body: String = b
-    private val timestamp: Long = t
-
-    def getBody: String = body
-    def getTimestamp: Long = timestamp
-  }
-
   class DataSchema(g: Granularity) {
 
     private val granularity: Granularity = g

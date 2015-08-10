@@ -2,6 +2,7 @@ package realtime;
 
 import org.joda.time.DateTime;
 import org.joda.time.MutableDateTime;
+import org.joda.time.Period;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
 
@@ -10,7 +11,9 @@ import org.joda.time.format.DateTimeFormatter;
  */
 public enum Granularity {
 
-    SECOND {
+
+
+    SECOND(new Period(0, 0, 1, 0)) {
         @Override
         public DateTime truncate(DateTime time) {
             final MutableDateTime mutableDateTime = time.toMutableDateTime();
@@ -24,7 +27,7 @@ public enum Granularity {
         }
     },
 
-    HOUR {
+    HOUR(new Period(1, 0, 0, 0)) {
         @Override
         public DateTime truncate(DateTime time) {
             final MutableDateTime mutableDateTime = time.toMutableDateTime();
@@ -40,7 +43,7 @@ public enum Granularity {
         }
     },
 
-    DAY {
+    DAY(new Period(0, 0, 0, 1, 0, 0, 0, 0)) {
         @Override
         public DateTime truncate(DateTime time) {
             final MutableDateTime mutableDateTime = time.toMutableDateTime();
@@ -52,13 +55,24 @@ public enum Granularity {
         public String format(DateTime time) {
             return time.toString(DateTimeFormat.forPattern("yyyy-MM-dd"));
         }
+
     };
 
     public abstract DateTime truncate(DateTime time);
 
     public abstract String format(DateTime time);
 
+    public Period duration() {
+        return duration;
+    }
+
     public static String defaultFormat(DateTime time) {
         return time.toString(DateTimeFormat.forPattern("yyyy-MM-dd-HH-mm-ss"));
+    }
+
+    Period duration;
+
+    Granularity(Period duration) {
+        this.duration = duration;
     }
 }

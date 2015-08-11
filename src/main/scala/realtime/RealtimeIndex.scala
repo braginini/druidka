@@ -13,9 +13,7 @@ object RealtimeIndex {
 
   case class HandsOff() //cmd to stop handling index and load to deep storage
 
-  case class Persisted(failed : Boolean)//msg saying whether persistence (snapshot) was successful or not
-
-  case class HandsOffed(failed: Boolean) //msg saying whether the segment was loaded to deep storage or not
+  case class Persisted(success : Boolean)//msg saying whether persistence (snapshot) was successful or not
 
   class RealtimeIndex extends PersistentActor with ActorLogging {
 
@@ -54,7 +52,6 @@ object RealtimeIndex {
       case HandsOff() =>
         log.debug("Received hand off")
         //todo add async load to deep storage
-        context.parent ! HandsOffed(true)
         context.stop(self)
     }
 

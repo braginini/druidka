@@ -21,17 +21,25 @@ object RealtimeManager {
     private val timestamp: Long = t
 
     def getBody: String = body
+
     def getTimestamp: Long = timestamp
   }
 
-  class RealtimeManager extends Actor with ActorLogging {
+  case class Persist()
 
-    import context.dispatcher
+  //cmd to save snapshot
+
+  case class HandsOff()
+
+  //cmd to stop handling index and load to deep storage
+
+  class RealtimeManager extends Actor with ActorLogging {
 
     //todo load from config
     val rejectionPolicy = new SimpleRejectionPolicy
     val dataSchema = new DataSchema(Granularity.SECOND)
-    val persistDelay = new Period(0, 1, 0, 0) // 1 minute
+    val persistDelay = new Period(0, 1, 0, 0)
+    // 1 minute
     val strugglingWindow = new Period(0, 1, 0, 0) //1 minute
 
 
@@ -41,7 +49,7 @@ object RealtimeManager {
         log.debug("Received new input row: {}, {}", body, timestamp)
         if (rejectionPolicy.accept(timestamp)) {
           log.debug("Accepted timestamp: {}", timestamp)
-          val index : ActorRef = getOrCreateIndexChild(InputRow(body, timestamp))
+          val index: ActorRef = getOrCreateIndexChild(InputRow(body, timestamp))
 
           //watch a child to receive terminated
           context.watch(index)
@@ -56,21 +64,23 @@ object RealtimeManager {
         log.debug("Received terminated: {}, {}", sender().path.name)
         //the child should not be longer in a child list
 
+      case Persisted(success) if success =>
+        log.debug("Received persisted: {}, {}", success, sender().path)
+        //reschedule persistence
+        context.system.scheduler.scheduleOnce(persistDelay.toStandardDuration.getMillis.millis) {
+          sender() ! Persist()
+        }
+
       case Persisted(success) =>
         log.debug("Received persisted: {}, {}", success, sender().path)
-        if (!success) {
-          //todo do something here
-        } else {
-          //reschedule persistence
-          context.system.scheduler.scheduleOnce(persistDelay.toStandardDuration.getMillis.millis) {
-            sender() ! Persist()
-          }
-        }
+        //todo do something here if not successful
 
       case r: Any => unhandled(r)
     }
 
-    def scheduleChildTasks(index : ActorRef): Unit = {
+    def scheduleChildTasks(index: ActorRef): Unit = {
+      import context.dispatcher
+
       //todo add a choice from config to allow persist every message or do it via snapshots
       //schedule 1st persist but we will reschedule it again after child confirms persistence b sending Persisted msg
       context.system.scheduler.scheduleOnce(persistDelay.toStandardDuration.getMillis.millis) {
@@ -85,12 +95,12 @@ object RealtimeManager {
       }
     }
 
-    def getOrCreateIndexChild(msg: InputRow) : ActorRef = {
+    def getOrCreateIndexChild(msg: InputRow): ActorRef = {
       val truncatedTimestamp: Long = dataSchema.getGranularity.truncate(new DateTime(msg.getTimestamp)).getMillis
       val indexName = "index-" + dataSchema.getGranularity.format(new DateTime(truncatedTimestamp))
 
       //get an existing child index actor or create an index child actor with a given granularity (name)
-      val index : Option[ActorRef] = context.child(indexName)
+      val index: Option[ActorRef] = context.child(indexName)
       index match {
         case Some(a) => a
         case None => context.actorOf(Props.create(classOf[RealtimeIndex]), indexName)

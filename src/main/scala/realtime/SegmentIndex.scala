@@ -1,6 +1,6 @@
 package realtime
 
-import realtime.SegmentManagerNode.NewEvent
+import realtime.SegmentManagerNode.AddEvent
 
 import scala.collection.immutable.HashMap
 
@@ -11,13 +11,13 @@ class SegmentIndex extends Serializable {
 
   private var index : HashMap[String, Long] = HashMap()
 
-  def addRow(row : NewEvent): Unit = {
+  def addRow(row : AddEvent): Unit = {
     index += (row.body -> row.timestamp)
   }
 
-  def getRow(key : String): Option[NewEvent] = {
+  def getRow(key : String): Option[AddEvent] = {
     index.get(key) match {
-      case Some(v) => Option(NewEvent(key, v))
+      case Some(v) => Option(AddEvent(key, v))
       case None => None
     }
   }

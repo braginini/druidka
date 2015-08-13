@@ -3,7 +3,7 @@ package realtime
 import akka.actor.ActorLogging
 import akka.persistence._
 import org.joda.time.Period
-import realtime.SegmentManagerNode.{HandsOff, Persist, NewEvent}
+import realtime.SegmentManagerNode.{HandsOff, Persist, AddEvent}
 import scala.concurrent.duration._
 
 /**
@@ -51,7 +51,7 @@ object SegmentWorkerNode {
     var lastEvent: Long = 0
 
     //updates the current index
-    def updateState(inputRow: NewEvent): Unit = {
+    def updateState(inputRow: AddEvent): Unit = {
       state.addRow(inputRow)
     }
 
@@ -68,10 +68,10 @@ object SegmentWorkerNode {
 
 
     override def receiveCommand: Receive = {
-      case NewEvent(body, timestamp) =>
+      case AddEvent(body, timestamp) =>
         log.debug("Received AddEvent: {}, {}", body, timestamp)
         lastEvent = System.currentTimeMillis()
-        updateState(NewEvent(body, timestamp))
+        updateState(AddEvent(body, timestamp))
       case Persist =>
         log.debug("Received Persist")
         if (!handsOff && (lastSnapshot.isEmpty || lastEvent > lastSnapshot.get.timestamp))

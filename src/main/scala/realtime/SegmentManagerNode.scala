@@ -1,11 +1,11 @@
 package realtime
 
 import akka.actor._
-import akka.persistence.{SnapshotOffer, PersistentActor}
+import akka.persistence._
 import org.joda.time.{Period, DateTime}
 import realtime.Domain._
 import realtime.SegmentWorkerNode._
-import scala.collection.immutable.HashSet
+import scala.collection.immutable.{HashMap}
 import scala.concurrent.duration._
 
 /**
@@ -19,41 +19,55 @@ object SegmentManagerNode {
   //cmd to finish segment
   case object HandsOff
 
-  case class NewEvent(body: String, timestamp: Long)
+  case class AddEvent(body: String, timestamp: Long)
 
   //the basic action for a worker
   sealed trait WorkerAction
 
-  case class AddedWorker(workerRef: ActorRef) extends WorkerAction
+  case class AddedWorker(workerRef: Worker) extends WorkerAction
 
   case class RemovedWorker(name: String) extends WorkerAction
+
+
+  @SerialVersionUID(1L)
+  class Worker(
+                val name: String,
+                @transient var ref: Option[ActorRef] = None)
+    extends Serializable
 
   /**
    * a state object used to keep the list of active workers in order to recover after failures
    *
    * @param activeWorkers
    */
-  case class SegmentManagerState(activeWorkers: HashSet[String] = HashSet.empty) {
+  case class SegmentManagerState(activeWorkers: HashMap[String, Worker] = HashMap.empty) {
     def updated(action: WorkerAction): SegmentManagerState = {
       action match {
         case RemovedWorker(name) => copy(activeWorkers - name)
-        case AddedWorker(workerRef) => copy(activeWorkers + workerRef.path.name)
+        case AddedWorker(worker) => copy(activeWorkers + (worker.ref.get.path.name -> worker))
       }
+    }
+
+    def get(name: String): Option[Worker] = {
+      activeWorkers.get(name)
     }
 
     def size(): Int = activeWorkers.size
   }
 
-  val indexChildPrefix: String = "index-"
 
   //cmd to stop handling index and load to deep storage
 
   class SegmentManagerNode extends PersistentActor with ActorLogging {
 
+    var lastSnapshot: Option[SnapshotMetadata] = None
+
     /**
      * keeps the names of current children
      */
     var state = SegmentManagerState()
+
+    val workerNamePrefix: String = "index-"
 
     import context.dispatcher
 
@@ -67,24 +81,73 @@ object SegmentManagerNode {
     def updateState(event: WorkerAction): Unit =
       state = state.updated(event)
 
+    //gets a worker ref from the state and if not exists, creates one
+    def getWorker(name: String): ActorRef = {
+      state.get(name).flatMap(_.ref) match {
+        case Some(ref) => ref
+        case None => create(name, false)
+      }
+    }
 
+    //schedule hands-off
+    def scheduleHandsOff(worker: ActorRef, granularity: Granularity, strugglingWindow: Period): Unit = {
+      val handsOff = granularity.duration().toStandardDuration.getMillis +
+        strugglingWindow.toStandardDuration.getMillis
+      context.system.scheduler.scheduleOnce(handsOff millis) {
+        worker ! HandsOff
+      }
+    }
+
+    //creates a child worker and saves snapshot if no recovery is detected
+    def create(name: String, recovery: Boolean): ActorRef = {
+      val worker = context.actorOf(Props.create(classOf[SegmentWorkerNode]), name)
+      updateState(AddedWorker(new Worker(name, Some(worker))))
+      if (!recovery) saveSnapshot(state)
+      worker
+    }
+
+    //builds a worker name based on granularity and given timestamp
+    def workerName(timestamp: Long, granularity: Granularity, prefix: String): String = {
+      val truncatedTimestamp: Long = granularity.truncate(new DateTime(timestamp)).getMillis
+      prefix + granularity.format(new DateTime(truncatedTimestamp))
+    }
+
+    /**
+     * Deletes old snapshots after a new one is saved.
+     */
+    def deleteOldSnapshots(lastSnapshot : Option[SnapshotMetadata]): Unit =
+      lastSnapshot.foreach { meta =>
+        val criteria = SnapshotSelectionCriteria(meta.sequenceNr, meta.timestamp - 1)
+        deleteSnapshots(criteria)
+      }
+
+    /**
+     * Restores all active children based on latest snapshot
+     *
+     * @return
+     */
     override def receiveRecover: Receive = {
-      case e: WorkerAction => updateState(e)
-      case s: SnapshotOffer => log.debug("Received snapshot {}", s)
+      case SnapshotOffer(_, snapshot) => {
+        snapshot.asInstanceOf[SegmentManagerState].activeWorkers.foreach { entry =>
+          create(entry._1, true)
+        }
+      }
     }
 
     override def receiveCommand: Receive = {
-
-      case NewEvent(body, timestamp) =>
-        log.debug("Received NewEvent: {}, {}", body, timestamp)
+      case SaveSnapshotSuccess(meta) => lastSnapshot = Some(meta); deleteOldSnapshots(lastSnapshot)
+      case SaveSnapshotFailure(_, e) => log.error(e, "Snapshot write failed")
+      case AddEvent(body, timestamp) =>
+        log.debug("Received AddEvent: {}, {}", body, timestamp)
         if (rejectionPolicy.accept(timestamp)) {
-          log.debug("Accepted timestamp: {}", timestamp)
-          val worker: ActorRef = getOrCreateChildWorker(timestamp, indexChildPrefix, classOf[SegmentWorkerNode])
+          log.debug("Accepted timestamp: {}", timestamp)      
+          val worker: ActorRef = getWorker(workerName(
+            timestamp, dataSchema.getGranularity, workerNamePrefix))
           //watch a child to receive terminated when it hands off
           context.watch(worker)
-          scheduleChildTasks(worker)
+          scheduleHandsOff(worker, dataSchema.getGranularity, strugglingWindow)
 
-          worker ! NewEvent(body, timestamp)
+          worker ! AddEvent(body, timestamp)
         } else {
           log.debug("Not accepted timestamp: {}", timestamp)
         }
@@ -92,9 +155,8 @@ object SegmentManagerNode {
       case Terminated(_) =>
         log.debug("Received Terminated: {}, {}", sender().path.name)
         //the child should not be longer in a child list
-        persist(RemovedWorker(sender().path.name)) { action =>
-          updateState(action)
-        }
+        updateState(RemovedWorker(sender().path.name))
+        saveSnapshot(state)
 
       case r: Any => unhandled(r)
     }
@@ -102,31 +164,7 @@ object SegmentManagerNode {
     override def persistenceId: String = self.path.name
 
 
-    def scheduleChildTasks(index: ActorRef): Unit = {
-      //schedule hands-off
-      val handsOff = dataSchema.getGranularity.duration().toStandardDuration.getMillis +
-        strugglingWindow.toStandardDuration.getMillis
-      context.system.scheduler.scheduleOnce(handsOff millis) {
-        index ! HandsOff
-      }
-    }
 
-    def getOrCreateChildWorker(timestamp: Long, namePrefix: String, actorClass: Class[_], constructorArgs: String*): ActorRef = {
-      val truncatedTimestamp: Long = dataSchema.getGranularity.truncate(new DateTime(timestamp)).getMillis
-      val indexName = namePrefix + dataSchema.getGranularity.format(new DateTime(truncatedTimestamp))
-
-      //get an existing child index actor or create an index child actor with a given granularity (name)
-      val index: Option[ActorRef] = context.child(indexName)
-      index match {
-        case Some(a) => a
-        case None =>
-          val worker = context.actorOf(Props.create(actorClass, constructorArgs: _*), indexName)
-          persist(AddedWorker(worker)) { action =>
-            updateState(action)
-          }
-          worker
-      }
-    }
   }
 
   def main(args: Array[String]): Unit = {
@@ -134,7 +172,7 @@ object SegmentManagerNode {
     val system = ActorSystem("Realtime")
     val a = system.actorOf(Props[SegmentManagerNode], "segment-manager")
 
-    a ! NewEvent("fff", System.currentTimeMillis())
+    a ! AddEvent("fff", System.currentTimeMillis())
 
     /*val b = system.actorOf(Props.create(classOf[MessageGenerator], a), "generator")*/
   }

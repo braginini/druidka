@@ -2,7 +2,7 @@ package realtime
 
 import akka.actor.{ActorRef, ActorLogging, Actor}
 import akka.actor.Actor.Receive
-import realtime.SegmentManagerNode.NewEvent
+import realtime.SegmentManagerNode.AddEvent
 import scala.concurrent.duration._
 
 import scala.util.Random
@@ -21,9 +21,9 @@ class MessageGenerator(a: ActorRef) extends Actor with ActorLogging {
     Stream.continually(r.nextInt(alphabet.size)).map(alphabet).take(n).mkString
 
   context.system.scheduler.schedule(400 millis, 400 millis) {
-    a ! new NewEvent(randomString(alphabet)(6) + System.currentTimeMillis(), System.currentTimeMillis())
-    a ! new NewEvent(randomString(alphabet)(6) + System.currentTimeMillis(), System.currentTimeMillis())
-    a ! new NewEvent(randomString(alphabet)(6) + System.currentTimeMillis(), System.currentTimeMillis())
+    a ! new AddEvent(randomString(alphabet)(6) + System.currentTimeMillis(), System.currentTimeMillis())
+    a ! new AddEvent(randomString(alphabet)(6) + System.currentTimeMillis(), System.currentTimeMillis())
+    a ! new AddEvent(randomString(alphabet)(6) + System.currentTimeMillis(), System.currentTimeMillis())
   }
 
   override def receive: Receive = {

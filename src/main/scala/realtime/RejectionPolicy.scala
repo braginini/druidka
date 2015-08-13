@@ -13,6 +13,6 @@ class SimpleRejectionPolicy extends RejectionPolicy {
   override def accept(timestamp: Long): Boolean = {
     val now: Long = System.currentTimeMillis
 
-    timestamp >= (now - 10 * 1000)
+    timestamp >= (now - 80 * 1000)
   }
 }

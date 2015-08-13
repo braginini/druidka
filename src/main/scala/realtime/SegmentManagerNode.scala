@@ -81,15 +81,28 @@ object SegmentManagerNode {
     def updateState(event: WorkerAction): Unit =
       state = state.updated(event)
 
-    //gets a worker ref from the state and if not exists, creates one
+    /**
+     * Gets a worker ref from the state and if not exists, creates one
+     *
+     * @param name
+     * @return
+     */
     def getWorker(name: String): ActorRef = {
       state.get(name).flatMap(_.ref) match {
         case Some(ref) => ref
-        case None => create(name, false)
+        case None => create(name, recovery = false)
       }
     }
 
-    //schedule hands-off
+    /**
+     * Schedules hands-off for a given worker. Worker will stop serving the segment.
+     * Usually workers may have struggling events, that for some reason (network) arrived after the granularity maximum timestamp.
+     * We need to add some window for that.
+     *
+     * @param worker
+     * @param granularity
+     * @param strugglingWindow
+     */
     def scheduleHandsOff(worker: ActorRef, granularity: Granularity, strugglingWindow: Period): Unit = {
       val handsOff = granularity.duration().toStandardDuration.getMillis +
         strugglingWindow.toStandardDuration.getMillis
@@ -98,7 +111,13 @@ object SegmentManagerNode {
       }
     }
 
-    //creates a child worker and saves snapshot if no recovery is detected
+    /**
+     * Creates a child worker and saves snapshot if no recovery is detected
+     *
+     * @param name
+     * @param recovery
+     * @return
+     */
     def create(name: String, recovery: Boolean): ActorRef = {
       val worker = context.actorOf(Props.create(classOf[SegmentWorkerNode]), name)
       updateState(AddedWorker(new Worker(name, Some(worker))))
@@ -106,7 +125,15 @@ object SegmentManagerNode {
       worker
     }
 
-    //builds a worker name based on granularity and given timestamp
+    /**
+     * Builds a worker name based on granularity, given timestamp and prefix.
+     * Truncates the timestamp to correspond granularity.
+     *
+     * @param timestamp
+     * @param granularity
+     * @param prefix
+     * @return
+     */
     def workerName(timestamp: Long, granularity: Granularity, prefix: String): String = {
       val truncatedTimestamp: Long = granularity.truncate(new DateTime(timestamp)).getMillis
       prefix + granularity.format(new DateTime(truncatedTimestamp))
@@ -129,7 +156,7 @@ object SegmentManagerNode {
     override def receiveRecover: Receive = {
       case SnapshotOffer(_, snapshot) => {
         snapshot.asInstanceOf[SegmentManagerState].activeWorkers.foreach { entry =>
-          create(entry._1, true)
+          create(entry._1, recovery = true)
         }
       }
     }

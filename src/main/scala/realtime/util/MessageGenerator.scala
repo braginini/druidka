@@ -1,10 +1,9 @@
-package realtime
+package realtime.util
 
-import akka.actor.{ActorRef, ActorLogging, Actor}
-import akka.actor.Actor.Receive
+import akka.actor.{Actor, ActorLogging, ActorRef}
 import realtime.SegmentManagerNode.AddEvent
-import scala.concurrent.duration._
 
+import scala.concurrent.duration._
 import scala.util.Random
 
 /**

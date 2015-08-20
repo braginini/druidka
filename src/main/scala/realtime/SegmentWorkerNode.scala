@@ -4,6 +4,7 @@ import akka.actor.ActorLogging
 import akka.persistence._
 import org.joda.time.Period
 import realtime.SegmentManagerNode.{HandsOff, Persist, AddEvent}
+import realtime.index.SegmentIndex
 import scala.concurrent.duration._
 
 /**
@@ -15,6 +16,9 @@ object SegmentWorkerNode {
 
   //successful persistence
   case object NotPersisted
+
+  //a message indicating that the segment was closed and ready to be sent to historical nodes
+  case class IndexReady(indexId : String)
 
   //unsuccessful persistence
 
@@ -82,7 +86,8 @@ object SegmentWorkerNode {
         lastSnapshot = Some(metadata)
         deleteOldSnapshots()
         if (handsOff)
-          context.stop(self)
+          context.parent ! IndexReady(persistenceId)
+          //context.stop(self)
         else {
           //reschedule persistence
           context.system.scheduler.scheduleOnce(

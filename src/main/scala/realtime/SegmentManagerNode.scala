@@ -4,6 +4,7 @@ import akka.actor._
 import akka.persistence._
 import org.joda.time.{Period, DateTime}
 import realtime.Domain._
+import realtime.SegmentManagerNode._
 import realtime.SegmentWorkerNode._
 import scala.collection.immutable.{HashMap}
 import scala.concurrent.duration._
@@ -55,7 +56,7 @@ object SegmentManagerNode {
     def size(): Int = activeWorkers.size
   }
 
-
+}
   //cmd to stop handling index and load to deep storage
 
   class SegmentManagerNode extends PersistentActor with ActorLogging {
@@ -192,7 +193,7 @@ object SegmentManagerNode {
 
 
 
-  }
+  }/*
 
   def main(args: Array[String]): Unit = {
 
@@ -202,6 +203,4 @@ object SegmentManagerNode {
     a ! AddEvent("fff", System.currentTimeMillis())
 
     /*val b = system.actorOf(Props.create(classOf[MessageGenerator], a), "generator")*/
-  }
-
-}
+  }*/
